@@ -1,0 +1,4 @@
+[submodule "optimistix"]
+	path = optimistix
+	url = https://github.com/IvanBioli/optimistix.git
+	branch = second_order

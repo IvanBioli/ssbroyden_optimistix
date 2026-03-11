@@ -1,0 +1,19 @@
+repos:
+-   repo: https://github.com/psf/black
+    rev: 25.1.0
+    hooks:
+    -   id: black
+
+-   repo: https://github.com/hadialqattan/pycln
+    rev: v2.5.0 # Possible releases: https://github.com/hadialqattan/pycln/releases
+    hooks:
+    -   id: pycln
+        args: [-a]
+
+-   repo: https://github.com/pycqa/isort
+    rev: 6.0.1
+    hooks:
+    -   id: isort
+        args: ["--profile", "black", "--filter-files"]
+
+exclude: '(optimistix)/.*'
