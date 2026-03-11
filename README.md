@@ -1,6 +1,6 @@
-# Self-Scaling Broyden Family of Quasi-Newton Methods in JAX
+# Self-Scaled Broyden Family of Quasi-Newton Methods in JAX
 
-A small add-on to the [Optimistix](https://github.com/patrick-kidger/optimistix) library, implementing the self-scaling Broyden family of quasi-Newton methods in [JAX](https://github.com/google/jax).
+A small add-on to the [Optimistix](https://github.com/patrick-kidger/optimistix) library, implementing the Self-Scaled Broyden family of quasi-Newton methods in [JAX](https://github.com/google/jax).
 
 ## Solvers
 
@@ -9,11 +9,11 @@ The repository provides the following quasi-Newton solvers:
 | Solver        | `thetak` | `tauk`   | Description                                                               |
 | ------------- | -------- | -------- | ------------------------------------------------------------------------- |
 | **BFGS**      | 0        | 1        | Classic BFGS (with Zoom linesearch, not available in upstream Optimistix) |
-| **SSBFGS**    | 0        | computed | Self-Scaling BFGS                                                         |
+| **SSBFGS**    | 0        | computed | Self-Scaled BFGS                                                          |
 | **DFP**       | 0        | 1        | Classic DFP                                                               |
-| **SSDFP**     | 1        | computed | Self-Scaling DFP                                                          |
-| **Broyden**   | computed | 1        | Broyden family (no self-scaling)                                          |
-| **SSBroyden** | computed | computed | Full Self-Scaling Broyden                                                 |
+| **SSDFP**     | 1        | computed | Self-Scaled DFP                                                           |
+| **Broyden**   | computed | 1        | Broyden family (no Self-Scaled)                                           |
+| **SSBroyden** | computed | computed | Full Self-Scaled Broyden                                                  |
 
 The implementation of the **Zoom linesearch** is taken (and merged into Optimistix with few changes) from [bagibence/zoom_linesearch](https://github.com/bagibence/optimistix/tree/zoom_linesearch).
 
