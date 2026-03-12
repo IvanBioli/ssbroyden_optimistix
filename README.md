@@ -86,3 +86,19 @@ In [optimistix_wrapper.py](optimistix_wrapper.py), thanks to some minor modifica
    pip install jupytext ipykernel matplotlib
    jupytext --to notebook example.py
    ```
+
+## Citation
+
+If you find this work useful, please cite our technical note:
+
+```bibtex
+@misc{bioli2026selfscaledbroydenfamilyquasinewton,
+      title={Self-Scaled Broyden Family of Quasi-Newton Methods in JAX}, 
+      author={Ivan Bioli and Mikel Mendibe Abarrategi},
+      year={2026},
+      eprint={2603.10599},
+      archivePrefix={arXiv},
+      primaryClass={cs.MS},
+      url={https://arxiv.org/abs/2603.10599}, 
+}
+```
