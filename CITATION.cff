@@ -5,6 +5,13 @@ type: software
 version: 0.1.0
 license: Apache-2.0
 repository-code: "https://github.com/IvanBioli/ssbroyden_optimistix"
+identifiers:
+  - type: doi
+    value: "10.5281/zenodo.23297645"
+    description: "Zenodo, version 0.1.0"
+  - type: doi
+    value: "10.5281/zenodo.23297644"
+    description: "Zenodo, all versions"
 authors:
   - family-names: Bioli
     given-names: Ivan

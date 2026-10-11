@@ -150,3 +150,7 @@ If you use this package, please cite the technical note:
   url           = {https://arxiv.org/abs/2603.10599}
 }
 ```
+
+The code is archived on Zenodo: version 0.1.0 is
+[doi:10.5281/zenodo.23297645](https://doi.org/10.5281/zenodo.23297645); all versions:
+[doi:10.5281/zenodo.23297644](https://doi.org/10.5281/zenodo.23297644).
