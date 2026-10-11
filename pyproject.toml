@@ -4,7 +4,7 @@ build-backend = "hatchling.build"
 
 [project]
 name = "ssbroyden-optimistix"
-version = "0.1.0"
+version = "0.1.1"
 description = "Self-scaling Broyden, BFGS, DFP and L-BFGS with a Zoom line search for Optimistix"
 readme = "README.md"
 requires-python = ">=3.11"
