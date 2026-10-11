@@ -1,6 +1,15 @@
+# SPDX-License-Identifier: Apache-2.0
+#
+# Adapted from Optimistix (https://github.com/patrick-kidger/optimistix, Apache-2.0,
+# copyright the Optimistix authors), as modified in the fork
+# https://github.com/IvanBioli/optimistix (tag cmame-2026).
+# Changes: imports rewritten to Optimistix' public API; the gradient at the trial point
+# is requested through `needs_grad_at_y_eval`; a `num_steps` counter; SSBroyden moved
+# to _ssbroyden.py.
+
 import abc
 from collections.abc import Callable
-from typing import Any, Generic, TypeVar, cast
+from typing import Any, cast, Generic, TypeVar
 
 import equinox as eqx
 import jax
@@ -11,34 +20,28 @@ from equinox import AbstractVar
 from equinox.internal import ω
 from jaxtyping import Array, Bool, Int, PyTree, Scalar
 
-from optimistix._custom_types import (
-    Aux,
-    DescentState,
-    Fn,
-    HessianUpdateState,
-    SearchState,
-    Y,
-)
-from optimistix._minimise import AbstractMinimiser
-from optimistix._misc import (
+from ._custom_types import Aux, DescentState, Fn, HessianUpdateState, SearchState, Y
+from optimistix import AbstractMinimiser
+from ._misc import (
     cauchy_termination,
-    default_verbose,
     filter_cond,
     lin_to_grad,
     max_norm,
+    needs_grad_at_y_eval,
     tree_dot,
     tree_full_like,
-    tree_where,
+    verbose_print,
 )
-from optimistix._search import (
+from optimistix import (
     AbstractDescent,
     AbstractSearch,
     FunctionInfo,
 )
-from optimistix._solution import RESULTS
-from optimistix._solver.backtracking import BacktrackingArmijo
-from optimistix._solver.gauss_newton import NewtonDescent
-from optimistix._solver.zoom import Zoom
+from optimistix import RESULTS
+from optimistix import BacktrackingArmijo
+from optimistix import NewtonDescent
+from ._zoom import Zoom
+
 
 _Hessian = TypeVar(
     "_Hessian", FunctionInfo.EvalGradHessian, FunctionInfo.EvalGradHessianInv
@@ -63,15 +66,12 @@ def _identity_pytree(pytree: PyTree[Array]) -> lx.PyTreeLinearOperator:
     eye_leaves = []
     for i1, l1 in enumerate(leaves):
         for i2, l2 in enumerate(leaves):
-            dtype = jnp.result_type(l1, l2)
             if i1 == i2:
                 eye_leaves.append(
-                    jnp.eye(jnp.size(l1), dtype=dtype).reshape(
-                        jnp.shape(l1) + jnp.shape(l2)
-                    )
+                    jnp.eye(jnp.size(l1)).reshape(jnp.shape(l1) + jnp.shape(l2))
                 )
             else:
-                eye_leaves.append(jnp.zeros(jnp.shape(l1) + jnp.shape(l2), dtype=dtype))
+                eye_leaves.append(jnp.zeros(jnp.shape(l1) + jnp.shape(l2)))
 
     # This has a Lineax positive_semidefinite tag. This is okay because the BFGS update
     # preserves positive-definiteness.
@@ -104,7 +104,8 @@ class _QuasiNewtonState(
     # Used for termination
     terminate: Bool[Array, ""]
     result: RESULTS
-    # Used in compat.py
+    # Counters: steps taken (each one evaluates a trial point) and steps accepted.
+    num_steps: Int[Array, ""]
     num_accepted_steps: Int[Array, ""]
     # update state
     hessian_update_state: HessianUpdateState
@@ -143,7 +144,7 @@ class AbstractQuasiNewton(
     use_inverse: AbstractVar[bool]
     descent: AbstractVar[AbstractDescent[Y, _Hessian, Any]]
     search: AbstractVar[AbstractSearch[Y, _Hessian, FunctionInfo.Eval, Any]]
-    verbose: AbstractVar[Callable[..., None]]
+    verbose: AbstractVar[frozenset[str]]
 
     @abc.abstractmethod
     def init_hessian(
@@ -201,6 +202,7 @@ class AbstractQuasiNewton(
             descent_state=self.descent.init(y, f_info_struct),
             terminate=jnp.array(False),
             result=RESULTS.successful,
+            num_steps=jnp.array(0),
             num_accepted_steps=jnp.array(0),
             hessian_update_state=hessian_update_state,
         )
@@ -219,8 +221,8 @@ class AbstractQuasiNewton(
             lambda _y: fn(_y, args), state.y_eval, has_aux=True
         )
 
-        if self.search._needs_grad_at_y_eval:
-            grad = lin_to_grad(lin_fn, state.y_eval, autodiff_mode, f_eval.dtype)
+        if needs_grad_at_y_eval(self.search):
+            grad = lin_to_grad(lin_fn, state.y_eval, autodiff_mode)
             f_eval_info = FunctionInfo.EvalGrad(f_eval, grad)
         else:
             f_eval_info = FunctionInfo.Eval(f_eval)
@@ -237,8 +239,8 @@ class AbstractQuasiNewton(
         def accepted(descent_state):
             nonlocal f_eval_info
 
-            if not self.search._needs_grad_at_y_eval:
-                grad = lin_to_grad(lin_fn, state.y_eval, autodiff_mode, f_eval.dtype)
+            if not needs_grad_at_y_eval(self.search):
+                grad = lin_to_grad(lin_fn, state.y_eval, autodiff_mode=autodiff_mode)
                 f_eval_info = FunctionInfo.EvalGrad(f_eval, grad)
 
             f_eval_info, hessian_update_state = self.update_hessian(
@@ -286,13 +288,19 @@ class AbstractQuasiNewton(
             accept, accepted, rejected, state.descent_state
         )
 
-        self.verbose(
-            loss_this_step=("Loss on this step", f_eval),
-            loss_last_accepted_step=("Loss on the last accepted step", state.f_info.f),
-            step_size=("Step size", step_size),
-            y=("y", state.y_eval),
-            y_last_accepted_step=("y on the last accepted step", y),
-        )
+        if len(self.verbose) > 0:
+            verbose_loss = "loss" in self.verbose
+            verbose_step_size = "step_size" in self.verbose
+            verbose_y = "y" in self.verbose
+            loss_eval = f_eval
+            loss = state.f_info.f
+            verbose_print(
+                (verbose_loss, "Loss on this step", loss_eval),
+                (verbose_loss, "Loss on the last accepted step", loss),
+                (verbose_step_size, "Step size", step_size),
+                (verbose_y, "y", state.y_eval),
+                (verbose_y, "y on the last accepted step", y),
+            )
 
         y_descent, descent_result = self.descent.step(step_size, descent_state)
         y_eval = (y**ω + y_descent**ω).ω
@@ -300,7 +308,6 @@ class AbstractQuasiNewton(
             search_result == RESULTS.successful, descent_result, search_result
         )
 
-        prev_aux = tree_where(state.first_step, aux, state.aux)
         state = _QuasiNewtonState(
             first_step=jnp.array(False),
             y_eval=y_eval,
@@ -310,10 +317,11 @@ class AbstractQuasiNewton(
             descent_state=descent_state,
             terminate=terminate,
             result=result,
+            num_steps=state.num_steps + 1,
             num_accepted_steps=state.num_accepted_steps + jnp.where(accept, 1, 0),
             hessian_update_state=hessian_update_state,
         )
-        return y, state, prev_aux
+        return y, state, aux
 
     def terminate(
         self,
@@ -424,19 +432,19 @@ class AbstractBFGS(AbstractQuasiNewton[Y, Aux, _Hessian, None]):
             args,
         )
 
-        # We're using type: ignore here because the type of `FunctionInfo` depends on
+        # We're using pyright: ignore here because the type of `FunctionInfo` depends on
         # the `use_inverse` attribute.
         # https://github.com/patrick-kidger/optimistix/pull/135#discussion_r2155452558
         if self.use_inverse:
             return (
-                FunctionInfo.EvalGradHessianInv(f_eval, grad, hessian),  # type: ignore
+                FunctionInfo.EvalGradHessianInv(f_eval, grad, hessian),
                 None,
-            )
+            )  # pyright: ignore
         else:
             return (
-                FunctionInfo.EvalGradHessian(f_eval, grad, hessian),  # type: ignore
+                FunctionInfo.EvalGradHessian(f_eval, grad, hessian),
                 None,
-            )
+            )  # pyright: ignore
 
 
 class BFGS(AbstractBFGS[Y, Aux, _Hessian]):
@@ -461,8 +469,8 @@ class BFGS(AbstractBFGS[Y, Aux, _Hessian]):
     norm: Callable[[PyTree], Scalar]
     use_inverse: bool
     descent: NewtonDescent
-    search: BacktrackingArmijo
-    verbose: Callable[..., None]
+    search: AbstractSearch
+    verbose: frozenset[str]
 
     def __init__(
         self,
@@ -470,16 +478,16 @@ class BFGS(AbstractBFGS[Y, Aux, _Hessian]):
         atol: float,
         norm: Callable[[PyTree], Scalar] = max_norm,
         use_inverse: bool = True,
-        verbose: bool | Callable[..., None] = False,
-        search: AbstractSearch = Zoom(),
+        verbose: frozenset[str] = frozenset(),
+        search: AbstractSearch | None = None,
     ):
         self.rtol = rtol
         self.atol = atol
         self.norm = norm
         self.use_inverse = use_inverse
         self.descent = NewtonDescent(linear_solver=lx.Cholesky())
-        self.search = search
-        self.verbose = default_verbose(verbose)
+        self.search = Zoom() if search is None else search
+        self.verbose = verbose
 
 
 BFGS.__init__.__doc__ = """**Arguments:**
@@ -500,11 +508,10 @@ BFGS.__init__.__doc__ = """**Arguments:**
     default is (b), denoted via `use_inverse=True`. Note that this is incompatible with
     searches like [`optimistix.ClassicalTrustRegion`][], which use the Hessian 
     approximation `B` as part of their computations.
-- `verbose`: Whether to print out extra information about how the solve is proceeding.
-    Can either be `False` to print out nothing, or `True` to print out all information,
-    or (for customisation) a callable `**kwargs -> None`. If provided as a callable then
-    each value will be a 2-tuple of `(str, jax.Array)` providing a human-readable name
-    and its corresponding value.
+- `verbose`: Whether to print out extra information about how the solve is
+    proceeding. Should be a frozenset of strings, specifying what information to print.
+    Valid entries are `step_size`, `loss`, `y`. For example
+    `verbose=frozenset({"step_size", "loss"})`.
 """
 
 
@@ -590,19 +597,19 @@ class AbstractDFP(AbstractQuasiNewton[Y, Aux, _Hessian, None]):
             args,
         )
 
-        # We're using type: ignore here because the type of `FunctionInfo` depends on
+        # We're using pyright: ignore here because the type of `FunctionInfo` depends on
         # the `use_inverse` attribute.
         # https://github.com/patrick-kidger/optimistix/pull/135#discussion_r2155452558
         if self.use_inverse:
             return (
-                FunctionInfo.EvalGradHessianInv(f_eval, grad, hessian),  # type: ignore
+                FunctionInfo.EvalGradHessianInv(f_eval, grad, hessian),
                 None,
-            )
+            )  # pyright: ignore
         else:
             return (
-                FunctionInfo.EvalGradHessian(f_eval, grad, hessian),  # type: ignore
+                FunctionInfo.EvalGradHessian(f_eval, grad, hessian),
                 None,
-            )
+            )  # pyright: ignore
 
 
 class DFP(AbstractDFP[Y, Aux, _Hessian]):
@@ -630,8 +637,8 @@ class DFP(AbstractDFP[Y, Aux, _Hessian]):
     norm: Callable[[PyTree], Scalar]
     use_inverse: bool
     descent: NewtonDescent
-    search: BacktrackingArmijo
-    verbose: Callable[..., None]
+    search: AbstractSearch
+    verbose: frozenset[str]
 
     def __init__(
         self,
@@ -639,16 +646,16 @@ class DFP(AbstractDFP[Y, Aux, _Hessian]):
         atol: float,
         norm: Callable[[PyTree], Scalar] = max_norm,
         use_inverse: bool = True,
-        verbose: bool | Callable[..., None] = False,
-        search: AbstractSearch = Zoom(),
+        verbose: frozenset[str] = frozenset(),
+        search: AbstractSearch | None = None,
     ):
         self.rtol = rtol
         self.atol = atol
         self.norm = norm
         self.use_inverse = use_inverse
         self.descent = NewtonDescent(linear_solver=lx.Cholesky())
-        self.search = search
-        self.verbose = default_verbose(verbose)
+        self.search = Zoom() if search is None else search
+        self.verbose = verbose
 
 
 DFP.__init__.__doc__ = """**Arguments:**
@@ -669,267 +676,8 @@ DFP.__init__.__doc__ = """**Arguments:**
     default is (b), denoted via `use_inverse=True`. Note that this is incompatible with
     searches like [`optimistix.ClassicalTrustRegion`][], which use the Hessian 
     approximation `B` as part of their computations.
-- `verbose`: Whether to print out extra information about how the solve is proceeding.
-    Can either be `False` to print out nothing, or `True` to print out all information,
-    or (for customisation) a callable `**kwargs -> None`. If provided as a callable then
-    each value will be a 2-tuple of `(str, jax.Array)` providing a human-readable name
-    and its corresponding value.
-"""
-
-
-class _SSBroydenUpdateState(eqx.Module):
-    """State for the self-scaling Broyden update."""
-
-    first_step: Bool[Array, ""]
-    step_size: Scalar
-
-
-class AbstractSSBroyden(AbstractQuasiNewton[Y, Aux, _Hessian, _SSBroydenUpdateState]):
-    """Abstract version of the Self-Scaling Broyden minimisation algorithm.
-
-    This is a quasi-Newton algorithm that uses a self-scaling update for the
-    inverse Hessian approximation. The self-scaling mechanism automatically adjusts
-    the scaling of the Hessian approximation at each iteration.
-
-    This class may be subclassed to implement custom solvers with alternative searches
-    and descent methods.
-
-    Note: This method only supports `use_inverse=True` as the self-scaling update
-    operates on the inverse Hessian.
-    """
-
-    use_inverse: bool = True  # Self-scaling only works with inverse Hessian
-
-    def init_hessian(
-        self, y: Y, f: Scalar, grad: Y
-    ) -> tuple[_Hessian, _SSBroydenUpdateState]:
-        identity_operator = _identity_pytree(y)
-        if self.use_inverse:
-            f_info = FunctionInfo.EvalGradHessianInv(f, grad, identity_operator)
-        else:
-            f_info = FunctionInfo.EvalGradHessian(f, grad, identity_operator)
-        return f_info, _SSBroydenUpdateState(
-            first_step=jnp.array(True),
-            step_size=jnp.array(1.0),
-        )  # pyright: ignore
-
-    def update_hessian(
-        self,
-        y: Y,
-        y_eval: Y,
-        f_info: _Hessian,
-        f_eval_info: FunctionInfo.EvalGrad,
-        hessian_update_state: _SSBroydenUpdateState,
-        step_size: Scalar,
-    ) -> tuple[_Hessian, _SSBroydenUpdateState]:
-        """Update the Hessian using self-scaling Broyden formula."""
-        f_eval = f_eval_info.f
-        grad = f_eval_info.grad
-        y_diff = (y_eval**ω - y**ω).ω
-        grad_diff = (grad**ω - f_info.grad**ω).ω
-        inner = tree_dot(grad_diff, y_diff)
-
-        # In particular inner = 0 on the first step (as then state.grad=0), and so for
-        # this we jump straight to the line search.
-        # Likewise we get inner <= eps on convergence, and so again we make no update
-        # to avoid a division by zero.
-        inner_nonzero = inner > jnp.finfo(inner.dtype).eps
-
-        def no_update(args):
-            *_, f_info, hessian_update_state, _step_size = args
-            if self.use_inverse:
-                return f_info.hessian_inv, hessian_update_state
-            else:
-                return f_info.hessian, hessian_update_state
-
-        def update(args):
-            inner, grad_diff, y_diff, f_info, hessian_update_state, step_sz = args
-            if self.use_inverse:
-                assert isinstance(f_info, FunctionInfo.EvalGradHessianInv)
-
-                hessian_inv = f_info.hessian_inv
-                rho = 1.0 / inner  # rho = 1 / (y_k^T s_k)
-
-                # H_k * y_k
-                Hy = hessian_inv.mv(grad_diff)
-                # y_k^T H_k y_k
-                yHy = tree_dot(grad_diff, Hy)
-
-                # Self-scaling parameters
-                hk = yHy * rho  # hk = (y_k^T H_k y_k) / (y_k^T s_k)
-
-                # bk = -alpha_k * rho * (s_k^T grad_k)
-                grad_prev = f_info.grad
-                # step_sz is the step size used to go from y to y_eval
-                bk = -step_sz * rho * tree_dot(y_diff, grad_prev)
-
-                ak = bk * hk - 1
-
-                # Compute ck
-                ck = jnp.sqrt(jnp.abs(ak / (1 + ak)))
-
-                # Compute rhokm and theta bounds
-                rhokm = jnp.minimum(1.0, hk * (1 - ck))
-                thetakm = (rhokm - 1) / ak
-                thetakp = 1 / rhokm
-                thetak = jnp.maximum(thetakm, jnp.minimum(thetakp, (1 - bk) / bk))
-
-                # Compute tauk based on iteration
-                is_first = hessian_update_state.first_step
-
-                def first_iter_tauk(_):
-                    return hk / (1 + ak * thetak)
-
-                def later_iter_tauk(_):
-                    # Get dimension from y_diff
-                    N = sum(jnp.size(leaf) for leaf in jtu.tree_leaves(y_diff))
-                    rhokk = jnp.minimum(1.0, 1.0 / bk)
-                    sigmak = 1 + thetak * ak
-                    sigmaknm1 = jnp.abs(sigmak) ** (1.0 / (1.0 - N))
-                    return jax.lax.cond(
-                        thetak <= 0,
-                        lambda _: jnp.minimum(rhokk * sigmaknm1, sigmak),
-                        lambda _: rhokk * jnp.minimum(sigmaknm1, 1 / thetak),
-                        operand=None,
-                    )
-
-                tauk = jax.lax.cond(
-                    is_first, first_iter_tauk, later_iter_tauk, operand=None
-                )
-
-                # v_k = s_k * rho - H_k y_k / (y_k^T H_k y_k)
-                vk = (y_diff**ω * rho - Hy**ω / yHy).ω
-
-                # phi_k = (1 - theta_k) / (1 + a_k * theta_k)
-                phik = (1 - thetak) / (1 + ak * thetak)
-
-                # Update formula:
-                # H_{k+1} = (H_k - Hy Hy^T / yHy + phik * yHy * vk vk^T) / tauk
-                #           + rho * s s^T
-                term1 = _outer(Hy, Hy)
-                term2 = _outer(vk, vk)
-                term3 = _outer(y_diff, y_diff)
-
-                new_hessian_pytree = (
-                    (hessian_inv.pytree**ω - term1**ω / yHy + term2**ω * (phik * yHy))
-                    / tauk
-                    + term3**ω * rho
-                ).ω
-
-                # Check for numerical stability
-                is_finite = jnp.isfinite(rho) & jnp.isfinite(1 / tauk)
-
-                new_hessian_pytree = jtu.tree_map(
-                    lambda new, old: jnp.where(is_finite, new, old),
-                    new_hessian_pytree,
-                    hessian_inv.pytree,
-                )
-
-                new_hessian_inv = lx.PyTreeLinearOperator(
-                    new_hessian_pytree,  # pyright: ignore
-                    output_structure=jax.eval_shape(lambda: grad_diff),
-                    tags=lx.positive_semidefinite_tag,
-                )
-
-                new_hessian_update_state = _SSBroydenUpdateState(
-                    first_step=jnp.array(False),
-                    step_size=step_sz,
-                )
-
-                return new_hessian_inv, new_hessian_update_state
-            else:
-                assert isinstance(f_info, FunctionInfo.EvalGradHessian)
-                raise NotImplementedError(
-                    "Self-scaling Broyden update only implemented for inverse Hessian."
-                )
-
-        args = (inner, grad_diff, y_diff, f_info, hessian_update_state, step_size)
-        hessian, new_update_state = filter_cond(
-            inner_nonzero,
-            update,
-            no_update,
-            args,
-        )
-
-        # Update state for next iteration
-        new_update_state = _SSBroydenUpdateState(
-            first_step=jnp.array(False),
-            step_size=step_size,
-        )
-
-        # We're using type: ignore here because the type of `FunctionInfo` depends on
-        # the `use_inverse` attribute.
-        # https://github.com/patrick-kidger/optimistix/pull/135#discussion_r2155452558
-        if self.use_inverse:
-            return (
-                FunctionInfo.EvalGradHessianInv(f_eval, grad, hessian),  # type: ignore
-                new_update_state,
-            )
-        else:
-            return (
-                FunctionInfo.EvalGradHessian(f_eval, grad, hessian),  # type: ignore
-                new_update_state,
-            )
-
-
-class SSBroyden(AbstractSSBroyden[Y, Aux, _Hessian]):
-    """Self-Scaling Broyden minimisation algorithm.
-
-    This is a quasi-Newton optimisation algorithm that uses a self-scaling update
-    for the inverse Hessian approximation. The self-scaling mechanism automatically
-    adjusts the scaling of the Hessian approximation at each iteration, which can
-    improve convergence in some cases.
-
-    The self-scaling update is based on the Broyden family of quasi-Newton methods
-    with automatic scaling parameter selection.
-
-    Supports the following `options`:
-
-    - `autodiff_mode`: whether to use forward- or reverse-mode autodifferentiation to
-        compute the gradient. Can be either `"fwd"` or `"bwd"`. Defaults to `"bwd"`,
-        which is usually more efficient. Changing this can be useful when the target
-        function does not support reverse-mode automatic differentiation.
-    """
-
-    rtol: float
-    atol: float
-    norm: Callable[[PyTree], Scalar]
-    use_inverse: bool
-    descent: NewtonDescent
-    search: AbstractSearch
-    verbose: Callable[..., None]
-
-    def __init__(
-        self,
-        rtol: float,
-        atol: float,
-        norm: Callable[[PyTree], Scalar] = max_norm,
-        verbose: bool | Callable[..., None] = False,
-        search: AbstractSearch = Zoom(),
-    ):
-        self.rtol = rtol
-        self.atol = atol
-        self.norm = norm
-        self.use_inverse = True  # Self-scaling only works with inverse Hessian
-        self.descent = NewtonDescent(linear_solver=lx.Cholesky())
-        self.search = search
-        self.verbose = default_verbose(verbose)
-
-
-SSBroyden.__init__.__doc__ = """**Arguments:**
-
-- `rtol`: Relative tolerance for terminating the solve.
-- `atol`: Absolute tolerance for terminating the solve.
-- `norm`: The norm used to determine the difference between two iterates in the
-    convergence criteria. Should be any function `PyTree -> Scalar`. Optimistix
-    includes three built-in norms: [`optimistix.max_norm`][],
-    [`optimistix.rms_norm`][], and [`optimistix.two_norm`][].
-- `verbose`: Whether to print out extra information about how the solve is proceeding.
-    Can either be `False` to print out nothing, or `True` to print out all information,
-    or (for customisation) a callable `**kwargs -> None`. If provided as a callable then
-    each value will be a 2-tuple of `(str, jax.Array)` providing a human-readable name
-    and its corresponding value.
-
-Note: This method always uses `use_inverse=True` as the self-scaling update operates
-on the inverse Hessian approximation.
+- `verbose`: Whether to print out extra information about how the solve is
+    proceeding. Should be a frozenset of strings, specifying what information to print.
+    Valid entries are `step_size`, `loss`, `y`. For example
+    `verbose=frozenset({"step_size", "loss"})`.
 """

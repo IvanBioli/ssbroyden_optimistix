@@ -220,3 +220,6 @@ __marimo__/
 .streamlit/secrets.toml
 old_quasi_newton copy.py
 settings.json
+
+# Old Optimistix fork checkout (formerly a submodule; kept on disk for local envs)
+/optimistix/

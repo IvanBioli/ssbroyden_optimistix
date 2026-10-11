@@ -26,13 +26,11 @@ import jax.numpy as jnp
 import matplotlib.pyplot as plt
 from jax import random, vmap
 
-from optimistix_wrapper import run_optimization
-from ssbrodyen_family import BFGS, SSBFGS, Broyden, SSBroyden, Zoom
+from ssbroyden_optimistix import BFGS, SSBFGS, Broyden, SSBroyden, Zoom
+from ssbroyden_optimistix.contrib import run
 
 # %%
 # Configure JAX
-dev = "gpu"
-jax.config.update("jax_platform_name", dev)
 jax.config.update("jax_enable_x64", True)
 
 # Set random seed for reproducibility
@@ -249,9 +247,7 @@ for name, solver in solvers.items():
 
     init = deepcopy(init_params)
     t0 = time.time()
-    res = run_optimization(
-        solver, loss, init, maxiter=maxiter, callback=callback, verbose=True
-    )
+    res = run(solver, loss, init, maxiter=maxiter, callback=callback, verbose=True)
     elapsed = time.time() - t0
 
     # Final errors

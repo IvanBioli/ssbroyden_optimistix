@@ -1,0 +1,39 @@
+cff-version: 1.2.0
+message: "If you use this software, please cite the technical note below."
+title: "ssbroyden-optimistix: self-scaled Broyden quasi-Newton methods for Optimistix"
+type: software
+version: 0.1.0
+license: Apache-2.0
+repository-code: "https://github.com/IvanBioli/ssbroyden_optimistix"
+authors:
+  - family-names: Bioli
+    given-names: Ivan
+    email: ivan.bioli@unipv.it
+    affiliation: "University of Pavia"
+  - family-names: Mendibe
+    given-names: Mikel
+    affiliation: "TECNALIA, Basque Research & Technology Alliance (BRTA), 48160 Derio, Spain"
+preferred-citation:
+  type: article
+  title: "Self-Scaled Broyden Family of Quasi-Newton Methods in JAX"
+  authors:
+    - family-names: Bioli
+      given-names: Ivan
+    - family-names: Mendibe Abarrategi
+      given-names: Mikel
+  year: 2026
+  doi: "10.48550/arXiv.2603.10599"
+  url: "https://arxiv.org/abs/2603.10599"
+references:
+  - type: article
+    title: "Accelerating Natural Gradient Descent for PINNs with Randomized Numerical Linear Algebra"
+    authors:
+      - family-names: Bioli
+        given-names: Ivan
+      - family-names: Marcati
+        given-names: Carlo
+      - family-names: Sangalli
+        given-names: Giancarlo
+    year: 2025
+    doi: "10.48550/arXiv.2505.11638"
+    url: "https://arxiv.org/abs/2505.11638"

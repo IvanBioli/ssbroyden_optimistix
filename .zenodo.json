@@ -1,0 +1,14 @@
+{
+  "title": "ssbroyden-optimistix: self-scaled Broyden quasi-Newton methods for Optimistix",
+  "upload_type": "software",
+  "description": "Quasi-Newton minimisers for Optimistix in JAX: BFGS, DFP, L-BFGS and the self-scaling Broyden family (SSBroyden, Broyden, SSBFGS, SSDFP), with a strong-Wolfe Zoom line search.",
+  "creators": [
+    {"name": "Bioli, Ivan", "affiliation": "University of Pavia"},
+    {"name": "Mendibe, Mikel", "affiliation": "TECNALIA, Basque Research & Technology Alliance (BRTA)"}
+  ],
+  "license": "Apache-2.0",
+  "keywords": ["quasi-Newton", "BFGS", "self-scaled Broyden", "JAX", "Optimistix"],
+  "related_identifiers": [
+    {"identifier": "arXiv:2603.10599", "relation": "isDocumentedBy", "scheme": "arxiv"}
+  ]
+}
