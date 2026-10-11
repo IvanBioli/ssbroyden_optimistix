@@ -39,19 +39,27 @@ print(sol.value, sol.state.num_accepted_steps)
 `optx.minimise` counts every evaluation of the line search as a step. To give a
 budget of accepted iterations, or to log at each iteration, drive the solver with
 `ssbroyden_optimistix.contrib.run(solver, loss_fn, params, maxiter, callback)`; see
-[example.py](example.py) (a PINN for the 3D Poisson equation).
+[example.py](https://github.com/IvanBioli/ssbroyden_optimistix/blob/main/example.py)
+(a PINN for the 3D Poisson equation).
 
 ## Solvers
 
-The self-scaling Broyden family updates the inverse Hessian approximation as
+The self-scaling Broyden family updates the approximation `H` of the inverse Hessian,
+after a step `s = x_new - x` with gradient change `y = g_new - g`, as
 
-$$H_{k+1} = \frac{1}{\tau_k}\Big(H_k - \frac{H_k y_k y_k^\top H_k}{y_k^\top H_k y_k}
-+ \phi_k\, (y_k^\top H_k y_k)\, v_k v_k^\top\Big) + \frac{s_k s_k^\top}{y_k^\top s_k},$$
+```text
+H_new = (H - H y y^T H / (y^T H y) + φ (y^T H y) v v^T) / τ + s s^T / (y^T s)
 
-where $\phi_k$ is determined by the family parameter $\theta_k$ (BFGS: $\theta_k = 0$,
-DFP: $\theta_k = 1$) and $\tau_k$ scales the approximation.
+v = s / (y^T s) - H y / (y^T H y)
+φ = (1 - θ) / (1 + a θ),   a = b h - 1
+h = y^T H y / (y^T s),     b = s^T B s / (y^T s),   B = H^(-1)
+```
 
-| Solver | $\theta_k$ | $\tau_k$ | |
+The family parameter θ interpolates between BFGS (θ = 0) and DFP (θ = 1), and τ
+scales the approximation; the technical note gives the choices of θ and τ of
+SSBroyden.
+
+| Solver | θ | τ | |
 | --- | --- | --- | --- |
 | `BFGS` | 0 | 1 | classic BFGS, with Zoom |
 | `DFP` | 1 | 1 | classic DFP, with Zoom |
@@ -65,13 +73,14 @@ All of them take `search=` (default `Zoom()`), and all but `LBFGS` take
 `use_inverse=` to approximate the inverse Hessian (default) or the Hessian. The family
 also takes:
 
-- `alpha`: the step length that enters the choice of $\theta_k$ and $\tau_k$.
-  `"geometric"` (default) computes it from the step and the search direction, so it is
-  exact for any line search; `"search"` uses the step size reported by the line
-  search, which is the length of the accepted step only for searches that report it
-  (such as `Zoom(initial_guess_strategy="keep")`, the default).
+- `alpha`: in the inverse form, `b` is computed as `b = -α s^T g / (y^T s)` (since
+  `B s = -α g`), with α the step length along the search direction `p = -H g`, so
+  that `s = α p`. `"geometric"` (default) takes `α = s^T p / (p^T p)`, which is exact
+  for any line search; `"search"` uses the step size reported by the line search,
+  which is the length of the accepted step only for searches that report it (such as
+  `Zoom(initial_guess_strategy="keep")`, the default).
 - `initial_scaling`: whether the first update uses the initial scaling
-  $\tau = h_k / (1 + a_k \theta_k)$ (default `True`).
+  `τ = h / (1 + a θ)` (default `True`).
 
 The class hierarchy (`AbstractQuasiNewton` → `AbstractSSBroydenFamily` →
 `AbstractSSBroyden`, `AbstractBroyden`, `AbstractSSBFGS`, `AbstractSSDFP`) lets you
@@ -133,7 +142,7 @@ otherwise).
 
 ## License
 
-Apache-2.0, see [LICENSE](LICENSE).
+Apache-2.0, see [LICENSE](https://github.com/IvanBioli/ssbroyden_optimistix/blob/main/LICENSE).
 
 ## Citation
 
